@@ -18,6 +18,13 @@
          allow read: if true;
          allow create: if true;
        }
+       
+       // Allow read/write to holders subcollection
+       match /holders/{holderId} {
+         allow read: if true;
+         allow create: if true;
+         allow update: if true;
+       }
      }
    }
  }

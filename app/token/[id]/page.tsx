@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { doc, onSnapshot, collection, addDoc, updateDoc, serverTimestamp, query, orderBy } from "firebase/firestore";
+import { doc, onSnapshot, collection, addDoc, updateDoc, serverTimestamp, query, orderBy, setDoc, getDoc, getDocs } from "firebase/firestore";
 import { db } from "@/firebase/config";
-import { Token, Trade, Comment } from "@/types";
-import { TrendingUp, TrendingDown, MessageCircle, Send } from "lucide-react";
+import { Token, Trade, Comment, Holder } from "@/types";
+import { TrendingUp, TrendingDown, MessageCircle, Send, Users } from "lucide-react";
 import Image from "next/image";
 
 export default function TokenDetailPage() {
@@ -13,11 +13,13 @@ export default function TokenDetailPage() {
   const [token, setToken] = useState<Token | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [holders, setHolders] = useState<Holder[]>([]);
   const [loading, setLoading] = useState(true);
   const [tradeAmount, setTradeAmount] = useState("");
   const [commentText, setCommentText] = useState("");
   const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
   const [processing, setProcessing] = useState(false);
+  const [currentUserAddress] = useState("USER_" + Math.random().toString(36).substr(2, 9));
 
   useEffect(() => {
     if (!tokenId) return;
@@ -40,10 +42,19 @@ export default function TokenDetailPage() {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Comment));
       setComments(list);
     });
+    const holdersQ = query(collection(db, "tokens", tokenId, "holders"));
+    const unsubHolders = onSnapshot(holdersQ, (snap) => {
+      const list: Holder[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Holder));
+      // Sort by tokens held descending
+      list.sort((a, b) => b.tokensHeld - a.tokensHeld);
+      setHolders(list);
+    });
     return () => {
       unsubToken();
       unsubTrades();
       unsubComments();
+      unsubHolders();
     };
   }, [tokenId]);
 
@@ -56,23 +67,79 @@ export default function TokenDetailPage() {
     }
     setProcessing(true);
     try {
+      // Calculate price and tokens based on bonding curve
+      const basePrice = 0.0001; // Starting price per token
+      const priceMultiplier = 1 + (token.bondingCurveProgress / 100);
+      const pricePerToken = basePrice * priceMultiplier;
+      const tokensAmount = amount / pricePerToken;
+      
       const impact = amount * 100;
       const newCap = activeTab === "buy" ? token.marketCap + impact : Math.max(1000, token.marketCap - impact);
       const newProg = Math.min(100, (newCap / 100000) * 100);
+      
+      // Update token market cap
       await updateDoc(doc(db, "tokens", tokenId), {
         marketCap: newCap,
         bondingCurveProgress: newProg,
+        totalSupply: (token.totalSupply || 1000000) + (activeTab === "buy" ? tokensAmount : -tokensAmount),
       });
+      
+      // Add trade to history
       await addDoc(collection(db, "tokens", tokenId, "trades"), {
         type: activeTab,
         amountSol: amount,
+        tokensAmount: tokensAmount,
+        pricePerToken: pricePerToken,
         timestamp: serverTimestamp(),
-        userAddress: "USER_" + Math.random().toString(36).substr(2, 9),
+        userAddress: currentUserAddress,
       });
+      
+      // Update holder information
+      const holderRef = doc(db, "tokens", tokenId, "holders", currentUserAddress);
+      const holderSnap = await getDoc(holderRef);
+      
+      if (holderSnap.exists()) {
+        const currentData = holderSnap.data();
+        const newTokensHeld = activeTab === "buy" 
+          ? currentData.tokensHeld + tokensAmount 
+          : Math.max(0, currentData.tokensHeld - tokensAmount);
+        const newTotalInvested = activeTab === "buy"
+          ? currentData.totalInvested + amount
+          : Math.max(0, currentData.totalInvested - amount);
+        
+        await updateDoc(holderRef, {
+          tokensHeld: newTokensHeld,
+          totalInvested: newTotalInvested,
+        });
+      } else if (activeTab === "buy") {
+        await setDoc(holderRef, {
+          userAddress: currentUserAddress,
+          tokensHeld: tokensAmount,
+          totalInvested: amount,
+          percentage: 0, // Will be calculated below
+        });
+      }
+      
+      // Recalculate all holders percentages
+      const holdersSnap = await getDocs(collection(db, "tokens", tokenId, "holders"));
+      let totalTokens = 0;
+      holdersSnap.forEach((doc) => {
+        totalTokens += doc.data().tokensHeld;
+      });
+      
+      // Update percentages
+      holdersSnap.forEach(async (holderDoc) => {
+        const percentage = (holderDoc.data().tokensHeld / totalTokens) * 100;
+        await updateDoc(doc(db, "tokens", tokenId, "holders", holderDoc.id), {
+          percentage: percentage,
+        });
+      });
+      
       setTradeAmount("");
       setProcessing(false);
     } catch (e) {
-      alert("Trade failed");
+      console.error("Trade error:", e);
+      alert("Trade failed: " + (e instanceof Error ? e.message : "Unknown error"));
       setProcessing(false);
     }
   };
@@ -163,18 +230,68 @@ export default function TokenDetailPage() {
                 <p className="text-gray-500 text-center py-4">No trades yet</p>
               ) : (
                 trades.slice(0, 10).map((t) => (
-                  <div key={t.id} className="flex justify-between border-b border-matrix-green/10 pb-2">
-                    <div className="flex items-center gap-2">
-                      {t.type === "buy" ? (
-                        <TrendingUp className="w-4 h-4 text-matrix-green" />
-                      ) : (
-                        <TrendingDown className="w-4 h-4 text-red-500" />
-                      )}
-                      <span className={t.type === "buy" ? "text-matrix-green" : "text-red-500"}>
-                        {t.type.toUpperCase()}
+                  <div key={t.id} className="border-b border-matrix-green/10 pb-2">
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="flex items-center gap-2">
+                        {t.type === "buy" ? (
+                          <TrendingUp className="w-4 h-4 text-matrix-green" />
+                        ) : (
+                          <TrendingDown className="w-4 h-4 text-red-500" />
+                        )}
+                        <span className={t.type === "buy" ? "text-matrix-green font-bold" : "text-red-500 font-bold"}>
+                          {t.type.toUpperCase()}
+                        </span>
+                      </div>
+                      <span className="font-bold">{t.amountSol} SOL</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>{t.tokensAmount?.toLocaleString(undefined, {maximumFractionDigits: 2})} {token.ticker}</span>
+                      <span className="font-mono">{t.userAddress?.slice(0, 8)}...</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="text-xl font-bold text-matrix-green mb-4 flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Holder Distribution ({holders.length})
+            </h3>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {holders.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">No holders yet</p>
+              ) : (
+                holders.map((holder, index) => (
+                  <div key={holder.id} className="bg-black/50 p-3 rounded-lg">
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-matrix-green font-bold">#{index + 1}</span>
+                        <span className="font-mono text-sm text-gray-400">
+                          {holder.userAddress.slice(0, 12)}...
+                        </span>
+                      </div>
+                      <span className="text-matrix-green font-bold">
+                        {holder.percentage.toFixed(2)}%
                       </span>
                     </div>
-                    <span className="font-bold">{t.amountSol} SOL</span>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <p className="text-gray-500">Tokens Held</p>
+                        <p className="font-bold">{holder.tokensHeld.toLocaleString(undefined, {maximumFractionDigits: 2})}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">Total Invested</p>
+                        <p className="font-bold">{holder.totalInvested.toFixed(2)} SOL</p>
+                      </div>
+                    </div>
+                    <div className="mt-2 w-full bg-black rounded-full h-2">
+                      <div
+                        className="bg-matrix-green h-full rounded-full transition-all"
+                        style={{ width: `${holder.percentage}%` }}
+                      />
+                    </div>
                   </div>
                 ))
               )}
@@ -221,6 +338,28 @@ export default function TokenDetailPage() {
                 />
               </div>
 
+              {tradeAmount && parseFloat(tradeAmount) > 0 && (
+                <div className="bg-black/50 p-3 rounded-lg text-sm">
+                  <p className="text-gray-400">You will {activeTab === "buy" ? "receive" : "sell"}:</p>
+                  <p className="text-matrix-green font-bold text-lg">
+                    {(() => {
+                      const basePrice = 0.0001;
+                      const priceMultiplier = 1 + ((token?.bondingCurveProgress || 0) / 100);
+                      const pricePerToken = basePrice * priceMultiplier;
+                      const tokensAmount = parseFloat(tradeAmount) / pricePerToken;
+                      return tokensAmount.toLocaleString(undefined, {maximumFractionDigits: 2});
+                    })()} {token.ticker}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Current price: {(() => {
+                      const basePrice = 0.0001;
+                      const priceMultiplier = 1 + ((token?.bondingCurveProgress || 0) / 100);
+                      return (basePrice * priceMultiplier).toFixed(6);
+                    })()} SOL per token
+                  </p>
+                </div>
+              )}
+
               <button
                 onClick={handleTrade}
                 disabled={processing || !tradeAmount}
@@ -232,6 +371,14 @@ export default function TokenDetailPage() {
                   ? "Processing..."
                   : `${activeTab === "buy" ? "Buy" : "Sell"} ${token.ticker}`}
               </button>
+
+              <div className="bg-blue-900/20 border border-blue-500/30 p-3 rounded-lg">
+                <p className="text-xs text-blue-400">
+                  <span className="font-bold">Your Address:</span>
+                  <br />
+                  <span className="font-mono">{currentUserAddress}</span>
+                </p>
+              </div>
 
               <p className="text-xs text-gray-500 text-center">
                 MVP: Simulated (no wallet)
