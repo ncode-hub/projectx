@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/firebase/config";
@@ -17,6 +17,15 @@ export default function CreateTokenPage() {
   const [imagePreview, setImagePreview] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    // Check if Firebase is configured
+    console.log("Firebase DB initialized:", !!db);
+    console.log("Firebase config:", {
+      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    });
+  }, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -42,7 +51,9 @@ export default function CreateTokenPage() {
       const imageUrl = imagePreview || "";
 
       console.log("Creating token document...");
-      const docRef = await addDoc(collection(db, "tokens"), {
+      
+      // Add timeout to prevent infinite loading
+      const createTokenPromise = addDoc(collection(db, "tokens"), {
         name: formData.name,
         ticker: formData.ticker.toUpperCase(),
         description: formData.description,
@@ -52,6 +63,12 @@ export default function CreateTokenPage() {
         bondingCurveProgress: 0,
         createdAt: serverTimestamp(),
       });
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout - Firestore may not be enabled')), 10000)
+      );
+
+      const docRef = await Promise.race([createTokenPromise, timeoutPromise]);
 
       console.log("Token created, redirecting to:", docRef.id);
       router.push(`/token/${docRef.id}`);
@@ -161,7 +178,19 @@ export default function CreateTokenPage() {
 
         {error && (
           <div className="bg-red-900/20 border border-red-500 text-red-400 px-4 py-3 rounded-lg">
-            {error}
+            <p className="font-bold mb-2">Error:</p>
+            <p>{error}</p>
+            {error.includes('timeout') && (
+              <div className="mt-3 text-sm">
+                <p className="font-bold mb-1">Possible solutions:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Enable Firestore Database in Firebase Console</li>
+                  <li>Set Firestore rules to allow read/write in test mode</li>
+                  <li>Check your internet connection</li>
+                  <li>Verify Firebase configuration in .env.local</li>
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
