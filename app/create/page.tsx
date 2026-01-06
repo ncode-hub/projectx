@@ -64,7 +64,7 @@ export default function CreateTokenPage() {
         createdAt: serverTimestamp(),
       });
 
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise<never>((_, reject) => 
         setTimeout(() => reject(new Error('Request timeout - Firestore may not be enabled')), 10000)
       );
 
