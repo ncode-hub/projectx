@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-matrix-dark text-white font-mono;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-matrix-green text-black px-6 py-3 rounded-lg font-bold hover:bg-green-400 transition-all duration-200 hover:shadow-lg hover:shadow-matrix-green/50;
+  }
+  
+  .btn-secondary {
+    @apply bg-matrix-gray border border-matrix-green/30 text-matrix-green px-6 py-3 rounded-lg font-bold hover:border-matrix-green hover:shadow-lg hover:shadow-matrix-green/20 transition-all duration-200;
+  }
+  
+  .btn-sell {
+    @apply bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-500 transition-all duration-200 hover:shadow-lg hover:shadow-red-600/50;
+  }
+  
+  .card {
+    @apply bg-matrix-gray border border-matrix-green/20 rounded-lg p-4 hover:border-matrix-green/50 transition-all duration-200;
+  }
+  
+  .input {
+    @apply bg-black border border-matrix-green/30 text-white px-4 py-2 rounded-lg focus:outline-none focus:border-matrix-green w-full;
+  }
+}
+
