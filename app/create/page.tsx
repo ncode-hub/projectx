@@ -21,10 +21,22 @@ export default function CreateTokenPage() {
   useEffect(() => {
     // Check if Firebase is configured
     console.log("Firebase DB initialized:", !!db);
-    console.log("Firebase config:", {
-      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    });
+    console.log("Environment variables check:");
+    console.log("- API_KEY:", process.env.NEXT_PUBLIC_FIREBASE_API_KEY ? "✓ Set" : "✗ Missing");
+    console.log("- PROJECT_ID:", process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "✗ Missing");
+    console.log("- AUTH_DOMAIN:", process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "✗ Missing");
+    
+    // Test Firestore connection
+    const testConnection = async () => {
+      try {
+        console.log("Testing Firestore connection...");
+        const testRef = collection(db, "tokens");
+        console.log("Collection reference created:", !!testRef);
+      } catch (err) {
+        console.error("Firestore connection test failed:", err);
+      }
+    };
+    testConnection();
   }, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {

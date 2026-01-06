@@ -1,0 +1,23 @@
+ rules_version = '2';
+ service cloud.firestore {
+   match /databases/{database}/documents {
+     // Allow read/write access to tokens collection
+     match /tokens/{tokenId} {
+       allow read: if true;
+       allow create: if true;
+       allow update: if true;
+       
+       // Allow read/write to trades subcollection
+       match /trades/{tradeId} {
+         allow read: if true;
+         allow create: if true;
+       }
+       
+       // Allow read/write to comments subcollection
+       match /comments/{commentId} {
+         allow read: if true;
+         allow create: if true;
+       }
+     }
+   }
+ }
